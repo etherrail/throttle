@@ -1,0 +1,30 @@
+{
+	"name": "@atcs/monitor",
+	"scripts": {
+		"build": "esbuild index.ts --platform=node --bundle --outdir=.built --external:skia-canvas --external:@kmamal/sdl --external:serialport --target=esnext",
+		"start": "npm run build && environment node .built/index.js"
+	},
+	"environment": {
+		"layout": {
+			"fileLocation": "Layout File Location"
+		},
+		"trainIndex": {
+			"fileLocation": "Train Index File Location"
+		}
+	},
+	"dependencies": {
+		"@acryps/environment": "^2.7.2",
+		"@kmamal/sdl": "^0.10.7",
+		"@packtrack/layout": "file:../layout",
+		"@packtrack/protocol": "file:../protocol",
+		"@packtrack/train": "file:../train",
+		"serialport": "^13.0.0",
+		"skia-canvas": "^2.0.1",
+		"xmldom": "^0.6.0"
+	},
+	"devDependencies": {
+		"@types/node": "^20.17.12",
+		"esbuild": "^0.21.4",
+		"typescript": "^5.3.3"
+	}
+}
