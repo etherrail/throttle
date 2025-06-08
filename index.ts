@@ -14,6 +14,10 @@ export const throttleSerialPath = process.argv[process.argv.indexOf('--throttle'
 export const panelSerialPath = process.argv[process.argv.indexOf('--panel') + 1];
 export const enableFullscreen = process.argv.includes('--fullscreen');
 
+console.log(`throttle device path: ${throttleSerialPath}`);
+console.log(`panel device path: ${throttleSerialPath}`);
+console.log(`fullscreen: ${throttleSerialPath}`);
+
 const layoutFileLocation = process.env.LAYOUT_FILE_LOCATION;
 const layout = Layout.from(new DOMParser().parseFromString(readFileSync(layoutFileLocation).toString(), "text/xml"));
 
