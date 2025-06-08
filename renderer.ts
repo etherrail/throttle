@@ -1,6 +1,7 @@
 import { Layout, Section } from "@packtrack/layout";
 import sdl from '@kmamal/sdl';
 import { Canvas, CanvasRenderingContext2D, Path2D } from "skia-canvas";
+import { enableFullscreen } from ".";
 
 export class Renderer {
 	readonly maximumFramerate = 60;
@@ -27,6 +28,7 @@ export class Renderer {
 			height: this.height,
 
 			resizable: true,
+			fullscreen: enableFullscreen
 		});
 
 		this.setupCanvas();

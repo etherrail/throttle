@@ -10,11 +10,9 @@ import { Display } from './display';
 import { SerialPort } from './serial';
 import { Button, nextTrainButton, pilotButton, previousTrainButton } from './button';
 
-const throttleSerialPath = process.argv.at(-2)!;
-console.log(`throttle serial path: ${throttleSerialPath}`);
-
-const panelSerialPath = process.argv.at(-1)!;
-console.log(`panel serial path: ${panelSerialPath}`);
+export const throttleSerialPath = process.argv[process.argv.indexOf('--throttle') + 1];
+export const panelSerialPath = process.argv[process.argv.indexOf('--panel') + 1];
+export const enableFullscreen = process.argv.includes('--fullscreen');
 
 const layoutFileLocation = process.env.LAYOUT_FILE_LOCATION;
 const layout = Layout.from(new DOMParser().parseFromString(readFileSync(layoutFileLocation).toString(), "text/xml"));
