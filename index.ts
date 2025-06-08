@@ -10,9 +10,9 @@ import { Display } from './display';
 import { SerialPort } from './serial';
 import { Button, nextTrainButton, pilotButton, previousTrainButton } from './button';
 
-export const throttleSerialPath = process.argv[process.argv.indexOf('--throttle') + 1];
-export const panelSerialPath = process.argv[process.argv.indexOf('--panel') + 1];
-export const enableFullscreen = process.argv.includes('--fullscreen');
+export const throttleSerialPath = process.env.THROTTLE_SERIAL_PATH;
+export const panelSerialPath = process.env.PANEL_SERIAL_PATH;
+export const enableFullscreen = 'FULLSCREEN' in process.env;
 
 console.log(`throttle device path: ${throttleSerialPath}`);
 console.log(`panel device path: ${throttleSerialPath}`);
