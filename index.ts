@@ -1,7 +1,7 @@
 import { Layout, SectionPosition } from '@packtrack/layout';
-import { Message, findMessageType, MonitorRouteMessage, TypedMessage, MonitorTrainPositionMessage, MonitorTrainSpeedPermitMessage, ThrottleButtonLightMessage, ThrottleTachometerMessage, ThrottleButtonPressMessage } from '@packtrack/protocol';
+import { Message, findMessageType, MonitorRouteMessage, TypedMessage, MonitorTrainPositionMessage, MonitorTrainSpeedPermitMessage, ThrottleButtonLightMessage, ThrottleTachometerMessage, ThrottleButtonPressMessage, ThrottleSpeedMessage, ThrottleLockMessage } from '@packtrack/protocol';
 import { MeasuredPosition, Train, TrainIndex } from '@packtrack/train'
-import { readFileSync } from 'fs';
+import { readdirSync, readFileSync } from 'fs';
 import { DOMParser } from "xmldom";
 import { Renderer } from './renderer';
 import { Socket } from 'net';
@@ -9,6 +9,12 @@ import { Discovery } from './discovery';
 import { Display } from './display';
 import { SerialPort } from './serial';
 import { Button, nextTrainButton, pilotButton, previousTrainButton } from './button';
+
+const throttleSerialPath = process.argv.at(-2)!;
+console.log(`throttle serial path: ${throttleSerialPath}`);
+
+const panelSerialPath = process.argv.at(-1)!;
+console.log(`panel serial path: ${panelSerialPath}`);
 
 const layoutFileLocation = process.env.LAYOUT_FILE_LOCATION;
 const layout = Layout.from(new DOMParser().parseFromString(readFileSync(layoutFileLocation).toString(), "text/xml"));
@@ -23,9 +29,11 @@ const start = () => {
 
 	discovery.find().then(director => {
 		connection.connect(141, director, () => {
-			serial.attach().then(() => {
+			panelSerial.attach().then(() => {
 				renderer.start();
 			});
+
+			throttleSerial.attach();
 		});
 
 		const router = new Map<TypedMessage, (message: Message) => void>();
@@ -46,7 +54,7 @@ const start = () => {
 			const train = trainIndex.trains.find(train => train.name == message.headers.train);
 			train.permit(+message.headers['speed'], new Date(message.headers['issued'] as string));
 
-			serial.send(new ThrottleTachometerMessage(Math.floor(train.currentSpeedPermit.speed * 3.6)));
+			panelSerial.send(new ThrottleTachometerMessage(Math.floor(train.currentSpeedPermit.speed * 3.6)));
 		});
 
 		router.set(MonitorTrainPositionMessage, message => {
@@ -76,6 +84,18 @@ const start = () => {
 			console.log(train.name, train.lastPositioner.location.toString());
 		});
 
+		const setTrain = (train: Train) => {
+			activeTrain = train;
+			connection.write(new ThrottleLockMessage(train.name).toBuffer());
+
+			console.log(`ACTIVE: ${train.name}`);
+		};
+
+		setTrain(trainIndex.trains[0]);
+
+		previousTrainButton.press = () => setTrain(trainIndex.trains[trainIndex.trains.indexOf(activeTrain) - 1] ?? trainIndex.trains.at(-1));
+		nextTrainButton.press = () => setTrain(trainIndex.trains[trainIndex.trains.indexOf(activeTrain) + 1] ?? trainIndex.trains[0]);
+
 		let buffer = Buffer.from([]);
 
 		connection.on('data', data => buffer = Message.dispatch(buffer, data, message => {
@@ -91,19 +111,18 @@ const start = () => {
 	});
 };
 
-let activeTrain = trainIndex.trains[0];
+let activeTrain: Train;
 const display = new Display(layout, trainIndex);
-
-previousTrainButton.press = () => activeTrain = trainIndex.trains[trainIndex.trains.indexOf(activeTrain) - 1] ?? trainIndex.trains.at(-1);
-nextTrainButton.press = () => activeTrain = trainIndex.trains[trainIndex.trains.indexOf(activeTrain) + 1] ?? trainIndex.trains[0];
 
 const renderer = new Renderer(1366, 768, layout, (width, height, context) => {
 	display.render(width, height, context, activeTrain);
 });
 
-Button.update = message => serial.send(message);
+Button.update = message => panelSerial.send(message);
 
-const serial = new SerialPort('/dev/cu.usbserial-420', message => {
+const panelSerial = new SerialPort(panelSerialPath, message => {
+	console.log(message);
+
 	pilotButton.light();
 
 	const router = new Map<TypedMessage, (message: Message) => void>();
@@ -115,6 +134,19 @@ const serial = new SerialPort('/dev/cu.usbserial-420', message => {
 		if (button?.press) {
 			button.press();
 		}
+	});
+
+	const type = findMessageType(message);
+	router.get(type)(message);
+});
+
+const throttleSerial = new SerialPort(throttleSerialPath, message => {
+	const router = new Map<TypedMessage, (message: Message) => void>();
+
+	router.set(ThrottleSpeedMessage, message => {
+		connection.write(new ThrottleSpeedMessage(
+			+message.headers.speed * 0xff
+		).toBuffer());
 	});
 
 	const type = findMessageType(message);

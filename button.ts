@@ -77,6 +77,6 @@ export const routeReleaseButton = new Button('route-release');
 export const railcarNextButton = new Button('railcar-next');
 export const railcarLastButton = new Button('railcar-last');
 
-export const pilotButton  = new Button('pilot');
+export const pilotButton = new Button('pilot');
 
-export const previousTrainButton  = new Button('previous-train');
+export const previousTrainButton = new Button('previous-train');

@@ -1,5 +1,5 @@
 {
-	"name": "@atcs/monitor",
+	"name": "@packtrack/monitor",
 	"scripts": {
 		"build": "esbuild index.ts --platform=node --bundle --outdir=.built --external:skia-canvas --external:@kmamal/sdl --external:serialport --target=esnext",
 		"start": "npm run build && environment node .built/index.js"
@@ -16,7 +16,7 @@
 		"@acryps/environment": "^2.7.2",
 		"@kmamal/sdl": "^0.10.7",
 		"@packtrack/layout": "file:../layout",
-		"@packtrack/protocol": "file:../protocol",
+		"@packtrack/protocol": "^1.5.0",
 		"@packtrack/train": "file:../train",
 		"serialport": "^13.0.0",
 		"skia-canvas": "^2.0.1",

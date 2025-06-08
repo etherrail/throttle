@@ -22,14 +22,14 @@ export class SerialPort {
 	async attach() {
 		this.handle = new NativePort({
 			path: this.port,
-			baudRate: 115200,
+			baudRate: 9600,
 			autoOpen: false
 		});
 
 		SerialPort.ports.push(this);
 
 		this.handle.on('data', data => {
-			console.log(data.toString());
+			console.log('*', data.toString());
 
 			this.messageBuffer = Message.dispatch(this.messageBuffer, data, message => {
 				if (message.routes(...LoginMessage.route)) {
@@ -49,6 +49,10 @@ export class SerialPort {
 
 				this.handleMessage(message);
 			});
+		});
+
+		this.handle.on('error', error => {
+			console.log('cannot open handle', error);
 		});
 
 		await new Promise<void>((done, fail) => this.handle.open(error => {
