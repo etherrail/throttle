@@ -15,9 +15,9 @@
 	"dependencies": {
 		"@acryps/environment": "^2.7.2",
 		"@kmamal/sdl": "^0.10.7",
-		"@packtrack/layout": "file:../layout",
+		"@packtrack/layout": "^1.4.0",
 		"@packtrack/protocol": "^1.5.0",
-		"@packtrack/train": "file:../train",
+		"@packtrack/train": "^1.2.0",
 		"serialport": "^13.0.0",
 		"skia-canvas": "^2.0.1",
 		"xmldom": "^0.6.0"
