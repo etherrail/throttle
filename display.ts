@@ -16,6 +16,7 @@ export class Display {
 	readonly textColor = '#fff';
 	readonly backgroundColor = '#000';
 	readonly branchColor = '#888';
+	readonly cursorColor = '#333';
 
 	// sections shown on a branch before it is cut off
 	readonly branchLookahead = 2;
@@ -30,9 +31,12 @@ export class Display {
 
 	activeTrain: Train;
 
-	// branches visible on the trail, in order of appearance
-	branches: Route[] = [];
-	selectedBranch: Route;
+	// first router ahead of the train, which is not locked by this throttle
+	cursor: { router: Router, routes: Route[] };
+	selectedRoute: Route;
+
+	// routers locked by this throttle, in order along the trail
+	trainLocks = new Map<Train, { router: Router, route: Route }[]>();
 
 	baseFontSize: number;
 	margin: { x: number, y: number };
@@ -130,6 +134,19 @@ export class Display {
 	renderRouteSection() {
 		const y = this.trainRows * this.rowHeight;
 		const height = this.routeRows * this.rowHeight;
+		const step = this.width / 5;
+		const middle = y + height / 2;
+
+		const stops = this.findStops(Math.floor((this.width - this.columnWidth * 2) / step));
+
+		// highlight cursor
+		const cursorIndex = stops.findIndex(stop => stop.router == this.cursor?.router);
+
+		if (cursorIndex != -1) {
+			this.context.fillStyle = this.cursorColor;
+			this.context.fillRect(this.columnWidth + cursorIndex * step, y, step, height);
+			this.context.fillStyle = this.textColor;
+		}
 
 		// draw location
 		this.context.textAlign = 'left';
@@ -141,47 +158,27 @@ export class Display {
 		this.context.textBaseline = 'bottom';
 		this.context.fillText(`${+new Date() - +this.activeTrain.lastPositioner.time}ms`, this.columnWidth + this.margin.x, y + height - this.margin.y);
 
-		// trail
-		let x = this.columnWidth;
-		let tip = this.activeTrain.head.nominal.section;
-		const step = this.width / 5;
-		const middle = y + height / 2;
-
 		// alternate branches above and below the trail to keep neighbouring forks apart
 		let branchSide = -1;
-		const branches: Route[] = [];
 
-		while (tip && x < this.width - this.columnWidth * 2) {
-			const router = this.activeTrain.reversed ? tip.in : tip.out;
+		for (let stop of stops) {
+			const x = this.columnWidth + stops.indexOf(stop) * step;
 
-			if (router instanceof Router) {
-				// labels are moved right to stay clear of the branch diagonals
-				this.context.textBaseline = 'bottom';
-				this.context.fillText(router.name, x + this.margin.x * 2, middle - this.margin.y);
+			// labels are moved right to stay clear of the branch diagonals
+			this.context.textBaseline = 'bottom';
+			this.context.fillText(stop.router.name, x + this.margin.x * 2, middle - this.margin.y);
 
-				this.context.textBaseline = 'top';
-				this.context.fillText(router.activeRoute.name, x + this.margin.x * 2, middle + this.margin.y);
+			this.context.textBaseline = 'top';
+			this.context.fillText(stop.route?.name ?? '-', x + this.margin.x * 2, middle + this.margin.y);
 
-				for (let route of this.alternativeRoutes(router, tip)) {
+			for (let route of this.availableRoutes(stop.router, stop.from)) {
+				if (route != stop.route) {
 					const limit = Math.min(x + step * 2, this.width - this.columnWidth) - this.margin.x;
 
-					this.renderBranch(route, tip, x, middle, middle + branchSide * height / 4, limit);
-					branches.push(route);
-
+					this.renderBranch(route, stop.from, x, middle, middle + branchSide * height / 4, limit);
 					branchSide = -branchSide;
 				}
-
-				x += step;
 			}
-
-			tip = tip.next(this.activeTrain.reversed);
-		}
-
-		this.branches = branches;
-
-		// keep the selection while the branch stays visible
-		if (!branches.includes(this.selectedBranch)) {
-			this.selectedBranch = branches[0];
 		}
 
 		this.context.lineWidth = 10;
@@ -191,19 +188,102 @@ export class Display {
 		this.context.stroke();
 	}
 
-	selectBranch(offset: number) {
-		if (!this.branches.length) {
+	// follows the trail ahead of the train through the locked routes, the route selected at the cursor and the active routes
+	// the first router which is not locked by this throttle becomes the cursor
+	findStops(limit: number) {
+		const stops: { router: Router, from: Section, route: Route }[] = [];
+		const locks = this.locks;
+
+		this.cursor = null;
+
+		let previous: Router | Section;
+		let tip = this.activeTrain.head.nominal.section;
+		let exit = this.activeTrain.reversed ? tip.in : tip.out;
+
+		while (exit && stops.length < limit) {
+			if (exit instanceof Section) {
+				previous = tip;
+				tip = exit;
+			} else {
+				const router = exit;
+				let route = locks.find(lock => lock.router == router)?.route;
+
+				if (!route && !this.cursor) {
+					this.cursor = { router, routes: this.availableRoutes(router, tip) };
+
+					// selection starts at the routers active route whenever the cursor moves
+					if (!this.cursor.routes.includes(this.selectedRoute)) {
+						this.selectedRoute = this.cursor.routes.includes(router.activeRoute) ? router.activeRoute : this.cursor.routes[0];
+					}
+
+					route = this.selectedRoute;
+				}
+
+				route ??= router.activeRoute;
+
+				// the router is not set to lead anywhere from here
+				if (route?.in != tip && route?.out != tip) {
+					stops.push({ router, from: tip, route: null });
+
+					break;
+				}
+
+				stops.push({ router, from: tip, route });
+
+				previous = router;
+				tip = route.in == tip ? route.out : route.in;
+			}
+
+			// continue on the far side, regardless of the orientation of the section
+			exit = tip.in == previous ? tip.out : tip.in;
+		}
+
+		return stops;
+	}
+
+	get locks() {
+		if (!this.trainLocks.has(this.activeTrain)) {
+			this.trainLocks.set(this.activeTrain, []);
+		}
+
+		return this.trainLocks.get(this.activeTrain);
+	}
+
+	cycleRoute(offset: number) {
+		const routes = this.cursor?.routes;
+
+		if (!routes?.length) {
 			return;
 		}
 
-		const index = this.branches.indexOf(this.selectedBranch) + offset;
-		this.selectedBranch = this.branches[(index + this.branches.length) % this.branches.length];
+		const index = routes.indexOf(this.selectedRoute) + offset;
+		this.selectedRoute = routes[(index + routes.length) % routes.length];
 	}
 
-	// routes which could be taken instead of the active route when arriving from a section
-	// only facing routers have alternatives, trailing routers merge into the active route
-	alternativeRoutes(router: Router, from: Section) {
-		return router.routes.filter(route => route != router.activeRoute && (route.in == from || route.out == from));
+	// locks the selected route and advances the cursor to the next router
+	//
+	// the route is shown as locked right away, the director switches it immediately
+	// a lock rejected by the director is not reflected here yet
+	lock() {
+		if (!this.cursor || !this.selectedRoute) {
+			return;
+		}
+
+		const route = this.selectedRoute;
+		this.locks.push({ router: this.cursor.router, route });
+
+		return route;
+	}
+
+	// releases the last lock, which moves the cursor back to its router
+	release() {
+		return this.locks.pop()?.router;
+	}
+
+	// routes leading away from a section through a router
+	// facing routers offer multiple routes, trailing routers only lead into one
+	availableRoutes(router: Router, from: Section) {
+		return router.routes.filter(route => route.in == from || route.out == from);
 	}
 
 	renderBranch(route: Route, from: Section, x: number, fromY: number, toY: number, limit: number) {
@@ -235,11 +315,9 @@ export class Display {
 		this.context.rect(x, Math.min(fromY, toY) - this.baseFontSize, limit - x, Math.abs(toY - fromY) + this.baseFontSize * 2);
 		this.context.clip();
 
-		const selected = route == this.selectedBranch;
-
-		this.context.strokeStyle = selected ? this.textColor : this.branchColor;
+		this.context.strokeStyle = this.branchColor;
 		this.context.fillStyle = this.textColor;
-		this.context.lineWidth = selected ? 6 : 4;
+		this.context.lineWidth = 4;
 		this.context.textAlign = 'left';
 		this.context.textBaseline = 'middle';
 		this.context.font = `${this.baseFontSize}px monospace`;

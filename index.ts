@@ -98,21 +98,27 @@ const start = () => {
 		previousTrainButton.press = () => setTrain(trainIndex.trains[trainIndex.trains.indexOf(activeTrain) - 1] ?? trainIndex.trains.at(-1));
 		nextTrainButton.press = () => setTrain(trainIndex.trains[trainIndex.trains.indexOf(activeTrain) + 1] ?? trainIndex.trains[0]);
 
-		routeUpButton.press = () => display.selectBranch(-1);
-		routeDownButton.press = () => display.selectBranch(1);
+		routeUpButton.press = () => display.cycleRoute(-1);
+		routeDownButton.press = () => display.cycleRoute(1);
 
 		// the director switches the router immediately, even if a train is on it
 		// we do not track train locations yet, this will be restricted later
 		routeLockButton.press = () => {
-			const route = display.selectedBranch;
+			const route = display.lock();
 
 			if (route) {
 				connection.write(new ThrottleRouteLockMessage(route.router.domainName, route.name).toBuffer());
 			}
 		};
 
-		// drops the reservations of this throttle, the routers keep their routes
-		routeReleaseButton.press = () => connection.write(new ThrottleRouteReleaseMessage().toBuffer());
+		// drops the reservation of the last locked router, the router keeps its route
+		routeReleaseButton.press = () => {
+			const router = display.release();
+
+			if (router) {
+				connection.write(new ThrottleRouteReleaseMessage(router.domainName).toBuffer());
+			}
+		};
 
 		let buffer = Buffer.from([]);
 
