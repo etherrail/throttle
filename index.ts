@@ -1,5 +1,5 @@
 import { Layout, SectionPosition } from '@packtrack/layout';
-import { Message, findMessageType, MonitorRouteMessage, TypedMessage, MonitorTrainPositionMessage, MonitorTrainSpeedPermitMessage, ThrottleButtonLightMessage, ThrottleTachometerMessage, ThrottleButtonPressMessage, ThrottleSpeedMessage, ThrottleLockMessage } from '@packtrack/protocol';
+import { Message, findMessageType, MonitorRouteMessage, TypedMessage, MonitorTrainPositionMessage, MonitorTrainSpeedPermitMessage, ThrottleButtonLightMessage, ThrottleTachometerMessage, ThrottleButtonPressMessage, ThrottleSpeedMessage, ThrottleLockMessage, ThrottleRouteLockMessage, ThrottleRouteReleaseMessage } from '@packtrack/protocol';
 import { MeasuredPosition, Train, TrainIndex } from '@packtrack/train'
 import { readdirSync, readFileSync } from 'fs';
 import { DOMParser } from "xmldom";
@@ -8,7 +8,7 @@ import { Socket } from 'net';
 import { Discovery } from './discovery';
 import { Display } from './display';
 import { SerialPort } from './serial';
-import { Button, nextTrainButton, pilotButton, previousTrainButton } from './button';
+import { Button, nextTrainButton, pilotButton, previousTrainButton, routeDownButton, routeLockButton, routeReleaseButton, routeUpButton } from './button';
 
 export const throttleSerialPath = process.env.THROTTLE_SERIAL_PATH;
 export const panelSerialPath = process.env.PANEL_SERIAL_PATH;
@@ -97,6 +97,22 @@ const start = () => {
 
 		previousTrainButton.press = () => setTrain(trainIndex.trains[trainIndex.trains.indexOf(activeTrain) - 1] ?? trainIndex.trains.at(-1));
 		nextTrainButton.press = () => setTrain(trainIndex.trains[trainIndex.trains.indexOf(activeTrain) + 1] ?? trainIndex.trains[0]);
+
+		routeUpButton.press = () => display.selectBranch(-1);
+		routeDownButton.press = () => display.selectBranch(1);
+
+		// the director switches the router immediately, even if a train is on it
+		// we do not track train locations yet, this will be restricted later
+		routeLockButton.press = () => {
+			const route = display.selectedBranch;
+
+			if (route) {
+				connection.write(new ThrottleRouteLockMessage(route.router.domainName, route.name).toBuffer());
+			}
+		};
+
+		// drops the reservations of this throttle, the routers keep their routes
+		routeReleaseButton.press = () => connection.write(new ThrottleRouteReleaseMessage().toBuffer());
 
 		let buffer = Buffer.from([]);
 
