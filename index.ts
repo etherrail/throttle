@@ -98,8 +98,9 @@ const start = () => {
 		previousTrainButton.press = () => setTrain(trainIndex.trains[trainIndex.trains.indexOf(activeTrain) - 1] ?? trainIndex.trains.at(-1));
 		nextTrainButton.press = () => setTrain(trainIndex.trains[trainIndex.trains.indexOf(activeTrain) + 1] ?? trainIndex.trains[0]);
 
-		routeUpButton.press = () => display.cycleRoute(-1);
-		routeDownButton.press = () => display.cycleRoute(1);
+		// routes after the selected one are drawn above the trail
+		routeUpButton.press = () => display.cycleRoute(1);
+		routeDownButton.press = () => display.cycleRoute(-1);
 
 		// the director switches the router immediately, even if a train is on it
 		// we do not track train locations yet, this will be restricted later

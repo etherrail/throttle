@@ -18,7 +18,7 @@ export class Display {
 	readonly branchColor = '#888';
 	readonly cursorColor = '#333';
 
-	// sections shown on a branch before it is cut off
+	// sections or routers shown on a branch before it is cut off
 	readonly branchLookahead = 2;
 
 	context: CanvasRenderingContext2D;
@@ -31,7 +31,7 @@ export class Display {
 
 	activeTrain: Train;
 
-	// first router ahead of the train, which is not locked by this throttle
+	// first router ahead of the train with a choice, which is not locked by this throttle
 	cursor: { router: Router, routes: Route[] };
 	selectedRoute: Route;
 
@@ -158,11 +158,9 @@ export class Display {
 		this.context.textBaseline = 'bottom';
 		this.context.fillText(`${+new Date() - +this.activeTrain.lastPositioner.time}ms`, this.columnWidth + this.margin.x, y + height - this.margin.y);
 
-		// alternate branches above and below the trail to keep neighbouring forks apart
-		let branchSide = -1;
-
 		for (let stop of stops) {
-			const x = this.columnWidth + stops.indexOf(stop) * step;
+			const index = stops.indexOf(stop);
+			const x = this.columnWidth + index * step;
 
 			// labels are moved right to stay clear of the branch diagonals
 			this.context.textBaseline = 'bottom';
@@ -171,13 +169,16 @@ export class Display {
 			this.context.textBaseline = 'top';
 			this.context.fillText(stop.route?.name ?? '-', x + this.margin.x * 2, middle + this.margin.y);
 
-			for (let route of this.availableRoutes(stop.router, stop.from)) {
-				if (route != stop.route) {
-					const limit = Math.min(x + step * 2, this.width - this.columnWidth) - this.margin.x;
+			// diverging branches leave room for the converging tracks of the next router
+			const divergingLimit = Math.min(x + (stops[index + 1]?.converging.length ? step / 2 : step), this.width - this.columnWidth) - this.margin.x;
+			const convergingLimit = Math.max(x - step / 2, 0) + this.margin.x;
 
-					this.renderBranch(route, stop.from, x, middle, middle + branchSide * height / 4, limit);
-					branchSide = -branchSide;
-				}
+			for (let route of stop.diverging) {
+				this.renderBranch(route, stop.from, x, middle, this.branchY(stop, route, middle, height), divergingLimit);
+			}
+
+			for (let route of stop.converging) {
+				this.renderConverging(route, stop.to, x, middle, this.branchY(stop, route, middle, height), convergingLimit);
 			}
 		}
 
@@ -191,7 +192,7 @@ export class Display {
 	// follows the trail ahead of the train through the locked routes, the route selected at the cursor and the active routes
 	// the first router which is not locked by this throttle becomes the cursor
 	findStops(limit: number) {
-		const stops: { router: Router, from: Section, route: Route }[] = [];
+		const stops: { router: Router, from: Section, route: Route, to: Section, diverging: Route[], converging: Route[] }[] = [];
 		const locks = this.locks;
 
 		this.cursor = null;
@@ -208,8 +209,11 @@ export class Display {
 				const router = exit;
 				let route = locks.find(lock => lock.router == router)?.route;
 
-				if (!route && !this.cursor) {
-					this.cursor = { router, routes: this.availableRoutes(router, tip) };
+				// routers without a choice are skipped, unless they are set against the trail
+				const routes = this.availableRoutes(router, tip);
+
+				if (!route && !this.cursor && (routes.length > 1 || !routes.includes(router.activeRoute))) {
+					this.cursor = { router, routes };
 
 					// selection starts at the routers active route whenever the cursor moves
 					if (!this.cursor.routes.includes(this.selectedRoute)) {
@@ -223,15 +227,22 @@ export class Display {
 
 				// the router is not set to lead anywhere from here
 				if (route?.in != tip && route?.out != tip) {
-					stops.push({ router, from: tip, route: null });
+					const diverging = this.availableRoutes(router, tip);
+					stops.push({ router, from: tip, route: null, to: null, diverging, converging: [] });
 
 					break;
 				}
 
-				stops.push({ router, from: tip, route });
+				const to = route.in == tip ? route.out : route.in;
+
+				// routes branching off the trail, and routes joining it from other tracks
+				const diverging = this.availableRoutes(router, tip).filter(candidate => candidate != route);
+				const converging = this.availableRoutes(router, to).filter(candidate => candidate != route && !diverging.includes(candidate));
+
+				stops.push({ router, from: tip, route, to, diverging, converging });
 
 				previous = router;
-				tip = route.in == tip ? route.out : route.in;
+				tip = to;
 			}
 
 			// continue on the far side, regardless of the orientation of the section
@@ -286,6 +297,65 @@ export class Display {
 		return router.routes.filter(route => route.in == from || route.out == from);
 	}
 
+	// routes are stacked in the order of the router, around the route taken
+	// routes before the taken route are placed below the trail, the ones after it above
+	// this keeps the routes in place when cycling through them, route-up selects the one above
+	branchY(stop: { router: Router, route: Route, diverging: Route[], converging: Route[] }, route: Route, middle: number, height: number) {
+		const order = stop.router.routes;
+		const taken = order.indexOf(stop.route);
+		const index = order.indexOf(route);
+
+		const above = index > taken;
+		const shown = [...stop.diverging, ...stop.converging];
+		const distance = shown.filter(candidate => (order.indexOf(candidate) > taken) == above && Math.abs(order.indexOf(candidate) - taken) <= Math.abs(index - taken)).length;
+
+		const offset = height * (0.25 + 0.12 * (distance - 1));
+
+		return above ? middle - offset : middle + offset;
+	}
+
+	// draws a track joining the trail at the router, with the section it comes from
+	renderConverging(route: Route, to: Section, x: number, toY: number, fromY: number, limit: number) {
+		const section = route.in == to ? route.out : route.in;
+		const labels = [route.name, section.name];
+
+		this.context.save();
+
+		this.context.beginPath();
+		this.context.rect(limit, Math.min(fromY, toY) - this.baseFontSize, x - limit, Math.abs(toY - fromY) + this.baseFontSize * 2);
+		this.context.clip();
+
+		this.context.strokeStyle = this.branchColor;
+		this.context.fillStyle = this.textColor;
+		this.context.lineWidth = 4;
+		this.context.textAlign = 'right';
+		this.context.textBaseline = 'middle';
+		this.context.font = `${this.baseFontSize}px monospace`;
+
+		// join the trail
+		let cursor = x - Math.abs(toY - fromY) / 2;
+
+		this.context.beginPath();
+		this.context.moveTo(x, toY);
+		this.context.lineTo(cursor, fromY);
+
+		// labels are laid out backwards, away from the router
+		for (let label of labels) {
+			const gap = this.baseFontSize;
+
+			this.context.lineTo(cursor - gap, fromY);
+			this.context.fillText(label, cursor - gap * 1.5, fromY);
+
+			cursor -= gap * 2 + this.context.measureText(label).width;
+			this.context.moveTo(cursor, fromY);
+		}
+
+		this.context.lineTo(limit, fromY);
+
+		this.context.stroke();
+		this.context.restore();
+	}
+
 	renderBranch(route: Route, from: Section, x: number, fromY: number, toY: number, limit: number) {
 		const labels = [route.name];
 
@@ -293,7 +363,7 @@ export class Display {
 		let previous: Router | Section = route.router;
 		let next: Router | Section = route.in == from ? route.out : route.in;
 
-		for (let depth = 0; next instanceof Section && depth < this.branchLookahead; depth++) {
+		while (next instanceof Section && labels.length <= this.branchLookahead) {
 			labels.push(next.name);
 
 			const exit = next.in == previous ? next.out : next.in;
@@ -303,7 +373,7 @@ export class Display {
 
 		const deadEnd = !next;
 
-		if (next instanceof Router) {
+		if (next instanceof Router && labels.length <= this.branchLookahead) {
 			labels.push(`${next.name} …`);
 		} else if (next) {
 			labels.push('…');
