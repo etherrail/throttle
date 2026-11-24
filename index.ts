@@ -102,6 +102,8 @@ const start = () => {
 		nextTrainButton.press = () => setTrain(trainIndex.trains[trainIndex.trains.indexOf(activeTrain) + 1] ?? trainIndex.trains[0]);
 
 		// routes after the selected one are drawn above the trail
+		pilotButton.press = () => display.cycleRouteLookahead();
+
 		routeUpButton.press = () => display.cycleRoute(1);
 		routeDownButton.press = () => display.cycleRoute(-1);
 

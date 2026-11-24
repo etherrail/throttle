@@ -56,9 +56,8 @@ export const unitActionButtons = [
 ];
 
 // left buttons
-export const leftButton1 = new Button('previous-train');
-
-export const pilotbutton = new Button('pilot');
+// previous-train and pilot are defined below
+export const pilotButton = new Button('pilot');
 export const leftButton3 = new Button('');
 export const leftButton4 = new Button('');
 export const leftButton5 = new Button('');
@@ -76,7 +75,5 @@ export const routeReleaseButton = new Button('route-release');
 
 export const railcarNextButton = new Button('railcar-next');
 export const railcarLastButton = new Button('railcar-last');
-
-export const pilotButton = new Button('pilot');
 
 export const previousTrainButton = new Button('previous-train');

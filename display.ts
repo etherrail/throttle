@@ -24,7 +24,8 @@ export class Display {
 	readonly branchLookahead = 2;
 
 	// track distance shown ahead of the train, in meters
-	routeLookahead = 500;
+	readonly routeLookaheads = [100, 250, 500, 1000, 2500, 5000, 10000];
+	routeLookahead = 2500;
 
 	directorAddress: string;
 	localAddress: string;
@@ -312,6 +313,11 @@ export class Display {
 		}
 
 		return { stops, marks, end: exit ? Infinity : distance };
+	}
+
+	cycleRouteLookahead() {
+		const index = this.routeLookaheads.indexOf(this.routeLookahead) + 1;
+		this.routeLookahead = this.routeLookaheads[index % this.routeLookaheads.length];
 	}
 
 	get locks() {
