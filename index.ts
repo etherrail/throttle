@@ -31,6 +31,9 @@ const start = () => {
 
 	discovery.find().then(director => {
 		connection.connect(141, director, () => {
+			display.directorAddress = director;
+			display.localAddress = connection.localAddress;
+
 			panelSerial.attach().then(() => {
 				renderer.start();
 			});
@@ -129,6 +132,9 @@ const start = () => {
 		}));
 
 		connection.on('close', () => {
+			display.directorAddress = null;
+			display.localAddress = null;
+
 			renderer.stop();
 
 			setTimeout(() => start(), 1000);

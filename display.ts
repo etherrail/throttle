@@ -5,6 +5,8 @@ import { Railcar } from "@packtrack/train/source/railcar";
 import { Traction } from "@packtrack/train/source/railcar/traction";
 import { Button, unitActionButtons } from "./button";
 
+type Stop = { router: Router, distance: number, from: Section, route: Route, to: Section, diverging: Route[], converging: Route[] };
+
 export class Display {
 	readonly trainRows = 1;
 	readonly routeRows = 4;
@@ -20,6 +22,12 @@ export class Display {
 
 	// sections or routers shown on a branch before it is cut off
 	readonly branchLookahead = 2;
+
+	// track distance shown ahead of the train, in meters
+	routeLookahead = 500;
+
+	directorAddress: string;
+	localAddress: string;
 
 	context: CanvasRenderingContext2D;
 
@@ -112,7 +120,10 @@ export class Display {
 			`${index + 1}/${this.trainIndex.trains.length}`,
 
 			// speed permit
-			`${+new Date() - +this.activeTrain.currentSpeedPermit.issued}ms`
+			`${+new Date() - +this.activeTrain.currentSpeedPermit.issued}ms`,
+
+			`director ${this.directorAddress ?? '-'}`,
+			`self ${this.localAddress ?? '-'}`
 		].join(' '), this.columnWidth + this.margin.x, this.margin.y);
 
 		// render name
@@ -134,33 +145,48 @@ export class Display {
 	renderRouteSection() {
 		const y = this.trainRows * this.rowHeight;
 		const height = this.routeRows * this.rowHeight;
-		const step = this.width / 5;
 		const middle = y + height / 2;
 
-		const stops = this.findStops(Math.floor((this.width - this.columnWidth * 2) / step));
+		// the trail is drawn to scale, from the trains head to the lookahead distance
+		const start = this.columnWidth;
+		const end = this.width - this.columnWidth;
+		const scale = (end - start) / this.routeLookahead;
+
+		const trail = this.followTrail(this.routeLookahead);
+		const stops = trail.stops;
+		const stopX = (stop: Stop) => start + stop.distance * scale;
+
+		this.context.font = `${this.baseFontSize}px monospace`;
 
 		// highlight cursor
-		const cursorIndex = stops.findIndex(stop => stop.router == this.cursor?.router);
+		const cursorStop = stops.find(stop => stop.router == this.cursor?.router);
 
-		if (cursorIndex != -1) {
+		if (cursorStop) {
+			const x = stopX(cursorStop);
+			const labelWidth = Math.max(this.context.measureText(cursorStop.router.name).width, this.context.measureText(cursorStop.route?.name ?? '-').width);
+
 			this.context.fillStyle = this.cursorColor;
-			this.context.fillRect(this.columnWidth + cursorIndex * step, y, step, height);
+			this.context.fillRect(x - this.margin.x, y, labelWidth + this.margin.x * 4, height);
 			this.context.fillStyle = this.textColor;
 		}
 
 		// draw location
 		this.context.textAlign = 'left';
 		this.context.textBaseline = 'top';
-		this.context.font = `${this.baseFontSize}px monospace`;
 		this.context.fillText(this.activeTrain.lastPositioner.location.section.name, this.columnWidth + this.margin.x, y + this.margin.y);
 
 		// draw positioner timeout
 		this.context.textBaseline = 'bottom';
 		this.context.fillText(`${+new Date() - +this.activeTrain.lastPositioner.time}ms`, this.columnWidth + this.margin.x, y + height - this.margin.y);
 
+		// draw scale
+		this.context.textAlign = 'right';
+		this.context.fillText(`${this.routeLookahead}m`, end - this.margin.x, y + height - this.margin.y);
+		this.context.textAlign = 'left';
+
 		for (let stop of stops) {
 			const index = stops.indexOf(stop);
-			const x = this.columnWidth + index * step;
+			const x = stopX(stop);
 
 			// labels are moved right to stay clear of the branch diagonals
 			this.context.textBaseline = 'bottom';
@@ -170,11 +196,15 @@ export class Display {
 			this.context.fillText(stop.route?.name ?? '-', x + this.margin.x * 2, middle + this.margin.y);
 
 			// diverging branches leave room for the converging tracks of the next router
-			const divergingLimit = Math.min(x + (stops[index + 1]?.converging.length ? step / 2 : step), this.width - this.columnWidth) - this.margin.x;
-			const convergingLimit = Math.max(x - step / 2, 0) + this.margin.x;
+			const next = stops[index + 1];
+			const nextX = next ? stopX(next) : end;
+			const divergingLimit = Math.min(next?.converging.length ? (x + nextX) / 2 : nextX, end) - this.margin.x;
+
+			const previousX = index ? stopX(stops[index - 1]) : 0;
+			const convergingLimit = (previousX + x) / 2 + this.margin.x;
 
 			for (let route of stop.diverging) {
-				this.renderBranch(route, stop.from, x, middle, this.branchY(stop, route, middle, height), divergingLimit);
+				this.renderBranch(route, stop.from, x, middle, this.branchY(stop, route, middle, height), divergingLimit, scale);
 			}
 
 			for (let route of stop.converging) {
@@ -182,27 +212,58 @@ export class Display {
 			}
 		}
 
+		// trail, ending early when the track ends or a router is set against it
+		const trailEnd = Math.min(start + trail.end * scale, end);
+
+		this.context.strokeStyle = this.textColor;
 		this.context.lineWidth = 10;
 		this.context.beginPath();
-		this.context.moveTo(this.columnWidth, middle);
-		this.context.lineTo(this.width - this.columnWidth, middle);
+		this.context.moveTo(start, middle);
+		this.context.lineTo(trailEnd, middle);
+
+		if (trail.end < this.routeLookahead) {
+			this.context.moveTo(trailEnd, middle - this.baseFontSize);
+			this.context.lineTo(trailEnd, middle + this.baseFontSize);
+		}
+
 		this.context.stroke();
+
+		// section boundaries are cut into the trail
+		this.context.strokeStyle = this.backgroundColor;
+		this.context.lineWidth = 2;
+		this.context.beginPath();
+
+		for (let mark of trail.marks) {
+			this.context.moveTo(start + mark * scale, middle - 5);
+			this.context.lineTo(start + mark * scale, middle + 5);
+		}
+
+		this.context.stroke();
+		this.context.strokeStyle = this.textColor;
 	}
 
 	// follows the trail ahead of the train through the locked routes, the route selected at the cursor and the active routes
-	// the first router which is not locked by this throttle becomes the cursor
-	findStops(limit: number) {
-		const stops: { router: Router, from: Section, route: Route, to: Section, diverging: Route[], converging: Route[] }[] = [];
+	// the first router with a choice, which is not locked by this throttle becomes the cursor
+	//
+	// distances are measured from the trains head
+	followTrail(lookahead: number) {
+		const stops: Stop[] = [];
+		const marks: number[] = [];
 		const locks = this.locks;
 
 		this.cursor = null;
 
-		let previous: Router | Section;
-		let tip = this.activeTrain.head.nominal.section;
-		let exit = this.activeTrain.reversed ? tip.in : tip.out;
+		const head = this.activeTrain.head.nominal;
 
-		while (exit && stops.length < limit) {
+		let previous: Router | Section;
+		let tip = head.section;
+		let exit = this.activeTrain.reversed ? tip.in : tip.out;
+		let distance = tip.length - head.offset;
+
+		while (exit && distance <= lookahead) {
 			if (exit instanceof Section) {
+				marks.push(distance);
+
 				previous = tip;
 				tip = exit;
 			} else {
@@ -227,29 +288,30 @@ export class Display {
 
 				// the router is not set to lead anywhere from here
 				if (route?.in != tip && route?.out != tip) {
-					const diverging = this.availableRoutes(router, tip);
-					stops.push({ router, from: tip, route: null, to: null, diverging, converging: [] });
+					stops.push({ router, distance, from: tip, route: null, to: null, diverging: routes, converging: [] });
 
-					break;
+					return { stops, marks, end: distance };
 				}
 
 				const to = route.in == tip ? route.out : route.in;
 
 				// routes branching off the trail, and routes joining it from other tracks
-				const diverging = this.availableRoutes(router, tip).filter(candidate => candidate != route);
+				const diverging = routes.filter(candidate => candidate != route);
 				const converging = this.availableRoutes(router, to).filter(candidate => candidate != route && !diverging.includes(candidate));
 
-				stops.push({ router, from: tip, route, to, diverging, converging });
+				stops.push({ router, distance, from: tip, route, to, diverging, converging });
 
 				previous = router;
 				tip = to;
 			}
 
+			distance += tip.length;
+
 			// continue on the far side, regardless of the orientation of the section
 			exit = tip.in == previous ? tip.out : tip.in;
 		}
 
-		return stops;
+		return { stops, marks, end: exit ? Infinity : distance };
 	}
 
 	get locks() {
@@ -300,7 +362,7 @@ export class Display {
 	// routes are stacked in the order of the router, around the route taken
 	// routes before the taken route are placed below the trail, the ones after it above
 	// this keeps the routes in place when cycling through them, route-up selects the one above
-	branchY(stop: { router: Router, route: Route, diverging: Route[], converging: Route[] }, route: Route, middle: number, height: number) {
+	branchY(stop: Stop, route: Route, middle: number, height: number) {
 		const order = stop.router.routes;
 		const taken = order.indexOf(stop.route);
 		const index = order.indexOf(route);
@@ -356,65 +418,72 @@ export class Display {
 		this.context.restore();
 	}
 
-	renderBranch(route: Route, from: Section, x: number, fromY: number, toY: number, limit: number) {
-		const labels = [route.name];
+	renderBranch(route: Route, from: Section, x: number, fromY: number, toY: number, limit: number, scale: number) {
+		const items: { label: string, distance: number }[] = [];
 
 		// follow the branch, regardless of the orientation of the sections on it
 		let previous: Router | Section = route.router;
 		let next: Router | Section = route.in == from ? route.out : route.in;
+		let distance = 0;
 
-		while (next instanceof Section && labels.length <= this.branchLookahead) {
-			labels.push(next.name);
+		while (next instanceof Section && items.length < this.branchLookahead) {
+			items.push({ label: next.name, distance });
+			distance += next.length;
 
 			const exit = next.in == previous ? next.out : next.in;
 			previous = next;
 			next = exit;
 		}
 
-		const deadEnd = !next;
-
-		if (next instanceof Router && labels.length <= this.branchLookahead) {
-			labels.push(`${next.name} …`);
-		} else if (next) {
-			labels.push('…');
+		if (next instanceof Router && items.length < this.branchLookahead) {
+			items.push({ label: `${next.name} …`, distance });
 		}
+
+		const deadEnd = !next;
 
 		this.context.save();
 
 		this.context.beginPath();
-		this.context.rect(x, Math.min(fromY, toY) - this.baseFontSize, limit - x, Math.abs(toY - fromY) + this.baseFontSize * 2);
+		this.context.rect(x, Math.min(fromY, toY) - this.baseFontSize * 2, limit - x, Math.abs(toY - fromY) + this.baseFontSize * 3);
 		this.context.clip();
 
 		this.context.strokeStyle = this.branchColor;
 		this.context.fillStyle = this.textColor;
 		this.context.lineWidth = 4;
 		this.context.textAlign = 'left';
-		this.context.textBaseline = 'middle';
+		this.context.textBaseline = 'bottom';
 		this.context.font = `${this.baseFontSize}px monospace`;
 
 		// diverge from the trail
-		let cursor = x + Math.abs(toY - fromY) / 2;
+		const knee = x + Math.abs(toY - fromY) / 2;
+		const end = deadEnd ? knee + distance * scale : limit;
 
 		this.context.beginPath();
 		this.context.moveTo(x, fromY);
-		this.context.lineTo(cursor, toY);
-
-		// section names, joined by track
-		for (let label of labels) {
-			const gap = this.baseFontSize;
-
-			this.context.lineTo(cursor + gap, toY);
-			this.context.fillText(label, cursor + gap * 1.5, toY);
-
-			cursor += gap * 2 + this.context.measureText(label).width;
-			this.context.moveTo(cursor, toY);
-		}
+		this.context.lineTo(knee, toY);
+		this.context.lineTo(end, toY);
 
 		if (deadEnd) {
-			this.context.moveTo(cursor, toY - this.baseFontSize / 2);
-			this.context.lineTo(cursor, toY + this.baseFontSize / 2);
-		} else {
-			this.context.lineTo(limit, toY);
+			this.context.moveTo(end, toY - this.baseFontSize / 2);
+			this.context.lineTo(end, toY + this.baseFontSize / 2);
+		}
+
+		// section starts are marked to scale, labels are pushed right when they would overlap
+		const labelY = toY - this.margin.y / 2;
+		let textEnd = knee;
+
+		for (let item of [{ label: route.name, distance: 0 }, ...items]) {
+			const position = knee + item.distance * scale;
+
+			if (item.distance) {
+				this.context.moveTo(position, toY - this.baseFontSize / 3);
+				this.context.lineTo(position, toY + this.baseFontSize / 3);
+			}
+
+			const labelX = Math.max(position + this.margin.x / 2, textEnd + this.margin.x);
+
+			this.context.fillText(item.label, labelX, labelY);
+			textEnd = labelX + this.context.measureText(item.label).width;
 		}
 
 		this.context.stroke();
