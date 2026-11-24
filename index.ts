@@ -159,15 +159,33 @@ const panelSerial = new SerialPort(panelSerialPath, message => {
 	const router = new Map<TypedMessage, (message: Message) => void>();
 
 	router.set(ThrottleButtonPressMessage, message => {
-		const button = Button.buttons.find(button => button.channel == message.headers.channel);
-		console.log('**', button.channel);
+		const channel = message.headers.channel;
+		const button = Button.buttons.find(button => button.channel == channel);
 
-		if (button?.press) {
-			button.press();
+		if (!button) {
+			console.warn(`button '${channel}': unknown button`);
+
+			return;
 		}
+
+		if (!button.press) {
+			console.log(`button '${channel}': no action assigned`);
+
+			return;
+		}
+
+		console.log(`button '${channel}'`);
+		button.press();
 	});
 
 	const type = findMessageType(message);
+
+	if (!router.has(type)) {
+		console.warn(`panel: unhandled message ${message.route.join('/')}`);
+
+		return;
+	}
+
 	router.get(type)(message);
 });
 
